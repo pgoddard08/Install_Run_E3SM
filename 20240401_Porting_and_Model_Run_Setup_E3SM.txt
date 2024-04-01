@@ -1,0 +1,142 @@
+# Porting E3SM v2.0.2
+
+# On BigRed200
+# In /N/project/MSB_Project/E3SMv2.1
+# https://e3sm.org/model/running-e3sm/e3sm-quick-start/
+# Had to follow directions to add my ssh public key to github
+# https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account
+# Then use git clone to get code
+git clone -b maint-2.1 --recursive https://github.com/E3SM-Project/E3SM.git
+# This is version 2.1.0
+cd /N/project/MSB_Project/E3SMv2.1/E3SM
+
+# ./manage_externals/checkout_externals  # This is a step for installing/porting CESM, but not E3SM? There is no manage_externals directory in E3SM?
+
+
+# Environmental Vars & see .bashrc for modules loaded (below)
+echo $HOME  #should be /N/u/pgoddard/BigRed200
+CIMEROOT="/N/project/MSB_Project/E3SMv2.1/E3SM/cime"
+CIME="/N/project/MSB_Project/E3SMv2.1/E3SM/cime"
+model="e3sm"
+machine="BigRed200"
+#OMP_STACKSIZE="256M"
+#OMP_PROC_BIND="spread"
+#OMP_PLACES="threads"
+compiler="intel" #or compiler="gnu"
+#NETCDF_PATH=$NETCDF_DIR
+
+# Increase stack size
+ulimit -s unlimited
+
+
+
+# Here are the module loads in my .bashrc:
+module unload cray-mpich
+module unload cray-hdf5-parallel
+module unload cray-parallel-netcdf
+module unload cray-netcdf-hdf5parallel
+module unload PrgEnv-gnu
+module unload python
+module load PrgEnv-intel
+module load intel/2021.2.0
+module load cray-libsci
+module load cray-mpich/8.1.16
+module load cray-parallel-netcdf
+module load cray-hdf5-parallel/1.12.1.3
+module load cray-netcdf-hdf5parallel/4.8.1.3
+module load cmake
+module load python
+
+
+
+# cime needs CPRNC built - I could not build it with E3SM directory tree with the directions below, but I had a working CPRNC executable from a CESM build, so that's what I've been using
+# Download and build CPRNC - Cant get it to create the exectuable - using the one create in CESM
+# https://github.com/ESMCI/cprnc
+#cd /N/project/MSB_Project/E3SMv2.1/E3SM/cime/tools
+#git clone --recursive https://github.com/ESMCI/cprnc.git
+#cd cprnc
+#mkdir bld
+#cd bld
+#module unload cray-parallel-netcdf/1.12.3.1 cray-netcdf-hdf5parallel/4.8.1.3
+#module load intel/2021.2.0
+#module load cray-hdf5/1.12.2.1
+#module load cray-netcdf/4.9.0.1
+
+
+# For cime, need a .cime directory in your home directory that contains config_batch.xml, config_compilers.xml, and config_machines.xml
+# I put these files in their current form in this repository
+
+# Check to ensure that your config_machines.xml file conforms to the CIME schema definition by doing the following: (the location of the .xsd file differs from CESM)
+xmllint --noout --schema $CIME//CIME/data/config/xml_schemas/config_machines.xsd $HOME/.cime/config_machines.xml
+
+
+# Run regression tests (Note, this test is in a different location than in CESM)
+cd /N/project/MSB_Project/E3SMv2.1/E3SM/cime/CIME/tests
+# Ran in screen
+./scripts_regression_tests.py
+# Output from 3/28/2024:
+Ran 228 tests in 6501.636s
+FAILED (failures=12, errors=3, skipped=12)
+
+
+
+# Attempting to run a simulation with a compset and grid
+# One time I did have a successful run; other times, following what I believe was the same procedure, I got SEGFAULT errors or errors during the step when the run was trying to download input data. This is where I am currently at - trying to have a successful run again. Next, I will reach out to someone with E3SM experience and find a compset and grid that should work and go from there. 4/1/2024.
+
+
+# Trying to run sample from https://e3sm.org/model/running-e3sm/e3sm-quick-start/
+# "Run Manually"
+cd /N/project/MSB_Project/E3SMv2.1/E3SM/cime/scripts
+
+# To see lists of available compsets, components, grids and machines, look at the help text:
+./query_config --help
+
+# To see all available component sets, try:
+./query_config --compsets all
+
+
+# Got this case to work 3/25/24 - have not been able to repeat the success
+# Had to change: ./create_newcase --case cmip6-picontrol --compset A_WCYCL1850S_CMIP6 --res ne30_oECv3_ICG --mach cori-knl --user-mods-dir ../config/e3sm/testmods_dirs/allactive/v1cmip6/
+# To:
+./create_newcase --case cmip6-picontrol --compset WCYCL1850 --res ne30pg2_EC30to60E2r2 
+# --user-mods-dir ../testmods_dirs/allactive/v1cmip6/
+# also tried: ne30_r0125_oECv3 - SEGFAULT errors
+
+
+# After case created, enter dir
+cd cmip6-picontrol/
+
+# Increase nodes
+vim env_mach_pes.xml  # If you use positive numbers it's processors.  Negative numbers is nodes
+
+    <entry id="NTASKS">
+      <type>integer</type>
+      <values>
+        <value compclass="ATM">-16</value>
+        <value compclass="CPL">-16</value>
+        <value compclass="OCN">-16</value>
+        <value compclass="WAV">-4</value>
+        <value compclass="GLC">-4</value>
+        <value compclass="ICE">-16</value>
+        <value compclass="ROF">-8</value>
+        <value compclass="LND">-8</value>
+        <value compclass="ESP">4</value>
+        <value compclass="IAC">4</value>
+
+
+# If an old case setup already exists, might want to run './case.setup --reset' before building
+./case.setup # some file are not found, but will attempt to download in the check_input_data phase
+./preview_run
+# If an old case build already exists, might want to run './case.build --clean' before building
+./case.build
+# Total build time: 506.666909 seconds #about
+# MODEL BUILD HAS FINISHED SUCCESSFULLY
+./case.submit # --debug
+
+# After you submit the case, you can follow the progress of your run by monitoring the CaseStatus file.
+tail CaseStatus # or more CaseStatus to view all
+
+# check out log files and output in /N/scratch/pgoddard/cime_scratch/cmip6-picontrol/run
+
+
+
